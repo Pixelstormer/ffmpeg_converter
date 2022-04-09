@@ -40,6 +40,7 @@ fn main() -> Result<(), anyhow::Error> {
     WalkBuilder::new(args.target_dir)
         .standard_filters(false)
         .types(types.build()?)
+        .threads(num_cpus::get())
         .build_parallel()
         .run(|| {
             Box::new(|path| match path {
