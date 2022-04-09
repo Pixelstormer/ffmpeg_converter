@@ -7,15 +7,25 @@ use std::{
     sync::atomic::{AtomicU16, Ordering},
 };
 
+/// Recursively searches a given directory and its subdirectories for files with a given extension,
+/// and uses ffmpeg to convert those files to a different extension.
+///
+/// Effectively functions as a shorthand for the following shell commands:
+///
+/// `fd -e mp3 -x ffmpeg -i {} {.}.opus && fd -e mp3 -x rm`.
 #[derive(Parser, Debug)]
 #[clap(version = clap::crate_version!())]
 struct Args {
+    /// If true, prints information about actions that would be taken, instead of actually doing anything.
     #[clap(short, long)]
     dry_run: bool,
+    /// The file extension to convert from.
     #[clap(default_value = "mp3")]
     from: String,
+    /// The file extension to convert to.
     #[clap(default_value = "opus")]
     to: String,
+    /// The directory to search in.
     #[clap(last = true, default_value = "./")]
     target_dir: PathBuf,
 }
