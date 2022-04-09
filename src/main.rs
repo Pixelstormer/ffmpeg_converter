@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::bail;
 use clap::Parser;
 use ignore::{types::TypesBuilder, WalkBuilder, WalkState};
 use std::{
@@ -20,13 +20,8 @@ struct Args {
     target_dir: PathBuf,
 }
 
-fn main() -> Result<(), anyhow::Error> {
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-
-    let mut types = TypesBuilder::new();
-    types.add("from", &format!("*.{}", args.from))?;
-    types.add("to", &format!("*.{}", args.to))?;
-    types.select("from").select("to");
 
     if args.dry_run {
         println!("Dry-run enabled");
@@ -37,6 +32,12 @@ fn main() -> Result<(), anyhow::Error> {
     let error_count = AtomicU16::new(0);
     let converted_count = AtomicU16::new(0);
 
+    let mut types = TypesBuilder::new();
+    types.add("from", &format!("*.{}", args.from))?;
+    types.select("from");
+
+    let current_dir = std::env::current_dir().ok();
+
     WalkBuilder::new(args.target_dir)
         .standard_filters(false)
         .types(types.build()?)
@@ -44,35 +45,41 @@ fn main() -> Result<(), anyhow::Error> {
         .build_parallel()
         .run(|| {
             Box::new(|path| match path {
-                Ok(dir) if dir.file_type().map_or(false, |f| f.is_file()) => {
-                    let path = dir.path();
-                    println!("Converting '{}'", path.display());
+                Ok(dir) if dir.file_type().map(|f| f.is_file()).unwrap_or_default() => {
+                    let input_path = dir.into_path();
+                    let output_path = input_path.with_extension(&args.to);
 
-                    if let Err(e @ anyhow::Error { .. }) = (|| {
-                        let from_path = path.to_str().ok_or_else(|| {
-                            anyhow!("Input path '{}' is not valid unicode", path.display())
-                        })?;
+                    println!(
+                        "Converting '{}'",
+                        current_dir
+                            .as_ref()
+                            .and_then(|p| pathdiff::diff_paths(&input_path, p))
+                            .as_ref()
+                            .unwrap_or(&input_path)
+                            .display()
+                    );
 
-                        let path = path.with_extension(&args.to);
-                        let to_path = path.to_str().ok_or_else(|| {
-                            anyhow!("Output path '{}' is not valid unicode", path.display())
-                        })?;
+                    let mut command = Command::new("ffmpeg");
+                    command.arg("-i").arg(&input_path).arg(output_path);
 
-                        let mut command = Command::new("ffmpeg");
-                        command.args(["-i", from_path, to_path]);
-                        if args.dry_run {
-                            println!("Dry_run: Running '{:?}'", command);
-                            println!("Dry_run: Removing file '{}'", from_path);
-                        } else {
-                            command.output()?;
-                            std::fs::remove_file(from_path)?;
-                        }
-
-                        converted_count.fetch_add(1, Ordering::Relaxed);
-                        Ok(())
-                    })() {
+                    if args.dry_run {
+                        println!("Dry_run: Running '{:?}'", command);
+                        println!("Dry_run: Removing file '{}'", input_path.display());
+                    } else if let Err(e) =
+                        command.output().map_err(anyhow::Error::new).and_then(|o| {
+                            o.status
+                                .success()
+                                .then(|| std::fs::remove_file(input_path))
+                                .map_or_else(
+                                    || bail!(String::from_utf8_lossy(&o.stderr).into_owned()),
+                                    |e| e.map_err(anyhow::Error::new),
+                                )
+                        })
+                    {
                         error_count.fetch_add(1, Ordering::Relaxed);
                         println!("{}", e);
+                    } else {
+                        converted_count.fetch_add(1, Ordering::Relaxed);
                     }
 
                     WalkState::Continue

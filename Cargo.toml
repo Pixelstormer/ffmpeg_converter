@@ -9,4 +9,5 @@ edition = "2021"
 ignore = "*"
 anyhow = "*"
 num_cpus = "*"
+pathdiff = "*"
 clap = { version = "*", features = ["derive", "cargo"] }
