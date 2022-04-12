@@ -19,6 +19,9 @@ struct Args {
     /// If true, prints information about actions that would be taken, instead of actually doing anything.
     #[clap(short, long)]
     dry_run: bool,
+    /// The maximum search depth. If unset, is infinite.
+    #[clap(short, long)]
+    max_depth: Option<usize>,
     /// The file extension to convert from.
     #[clap(default_value = "mp3")]
     from: String,
@@ -51,6 +54,7 @@ fn main() -> anyhow::Result<()> {
     WalkBuilder::new(args.target_dir)
         .standard_filters(false)
         .types(types.build()?)
+        .max_depth(args.max_depth)
         .threads(num_cpus::get())
         .build_parallel()
         .run(|| {
