@@ -44,3 +44,14 @@ OPTIONS:
     -V, --version
             Print version information
 ```
+
+## Examples
+To recursively convert all `*.mp3` files in the current directory and any subdirectories to `*.opus` files:
+```
+cv
+```
+
+To recursively convert all `*.wav` files in the `Music/` directory and any subdirectories to `*.flac` files:
+```
+cv wav flac -- Music/
+```
