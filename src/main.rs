@@ -70,7 +70,7 @@ fn main() -> anyhow::Result<()> {
                     );
 
                     let mut command = Command::new("ffmpeg");
-                    command.arg("-i").arg(&input_path).arg(output_path);
+                    command.arg("-i").arg(&input_path).arg(&output_path);
 
                     if args.dry_run {
                         println!("Dry_run: Running '{:?}'", command);
@@ -90,6 +90,16 @@ fn main() -> anyhow::Result<()> {
                         println!("{}", e);
                     } else {
                         converted_count.fetch_add(1, Ordering::Relaxed);
+
+                        println!(
+                            "Finished converting '{}'",
+                            current_dir
+                                .as_ref()
+                                .and_then(|p| pathdiff::diff_paths(&output_path, p))
+                                .as_ref()
+                                .unwrap_or(&output_path)
+                                .display()
+                        );
                     }
 
                     WalkState::Continue
