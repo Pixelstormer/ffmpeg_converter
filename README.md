@@ -6,7 +6,7 @@ You must have the [`ffmpeg`](https://ffmpeg.org/) binary in your PATH for this a
 
 ## Usage
 ```
-ffmpeg_converter 1.0.0
+ffmpeg_converter 1.1.0
 Recursively searches a given directory and its subdirectories for files with a given extension, and
 uses ffmpeg to convert those files to a different extension.
 
@@ -15,7 +15,7 @@ Effectively functions as a shorthand for the following shell commands:
 `fd -e mp3 -x ffmpeg -i {} {.}.opus && fd -e mp3 -x rm`.
 
 USAGE:
-    ffmpeg_converter [OPTIONS] [FROM] [TO] [-- <TARGET_DIR>]
+    cv [OPTIONS] [FROM] [TO] [-- <TARGET_DIR>]
 
 ARGS:
     <FROM>
@@ -35,11 +35,20 @@ ARGS:
 
 OPTIONS:
     -d, --dry-run
-            If true, prints information about actions that would be taken, instead of actually doing
+            If set, prints information about actions that would be taken, instead of actually doing
             anything
+
+    -f, --follow-links
+            If set, follows symbolic links
 
     -h, --help
             Print help information
+
+    -m, --max-depth <MAX_DEPTH>
+            The maximum search depth. If unset, is infinite
+
+    -s, --same-fs
+            If set, avoids crossing file system boundries when searching
 
     -V, --version
             Print version information
