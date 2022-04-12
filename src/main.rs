@@ -16,12 +16,15 @@ use std::{
 #[derive(Parser, Debug)]
 #[clap(version = clap::crate_version!())]
 struct Args {
-    /// If true, prints information about actions that would be taken, instead of actually doing anything.
+    /// If set, prints information about actions that would be taken, instead of actually doing anything.
     #[clap(short, long)]
     dry_run: bool,
     /// The maximum search depth. If unset, is infinite.
     #[clap(short, long)]
     max_depth: Option<usize>,
+    /// If set, follows symbolic links.
+    #[clap(short, long)]
+    follow_links: bool,
     /// The file extension to convert from.
     #[clap(default_value = "mp3")]
     from: String,
@@ -55,6 +58,7 @@ fn main() -> anyhow::Result<()> {
         .standard_filters(false)
         .types(types.build()?)
         .max_depth(args.max_depth)
+        .follow_links(args.follow_links)
         .threads(num_cpus::get())
         .build_parallel()
         .run(|| {
