@@ -25,6 +25,9 @@ struct Args {
     /// If set, follows symbolic links.
     #[clap(short, long)]
     follow_links: bool,
+    /// If set, avoids crossing file system boundries when searching.
+    #[clap(short, long)]
+    same_fs: bool,
     /// The file extension to convert from.
     #[clap(default_value = "mp3")]
     from: String,
@@ -59,6 +62,7 @@ fn main() -> anyhow::Result<()> {
         .types(types.build()?)
         .max_depth(args.max_depth)
         .follow_links(args.follow_links)
+        .same_file_system(args.same_fs)
         .threads(num_cpus::get())
         .build_parallel()
         .run(|| {
