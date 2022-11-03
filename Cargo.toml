@@ -8,8 +8,8 @@ name = "cv"
 path = "src/main.rs"
 
 [dependencies]
-ignore = "*"
-anyhow = "*"
-num_cpus = "*"
-pathdiff = "*"
-clap = { version = "*", features = ["derive", "cargo"] }
+ignore = "0.4"
+anyhow = "1.0"
+num_cpus = "1.14"
+pathdiff = "0.2"
+clap = { version = "4.0", features = ["derive", "cargo"] }
