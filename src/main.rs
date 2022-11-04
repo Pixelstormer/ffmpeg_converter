@@ -10,6 +10,28 @@ use std::{
     sync::atomic::{AtomicU16, Ordering},
 };
 
+macro_rules! log_verbose {
+    ($self:ident, $($arg:tt)*) => {{
+        if $self.args.verbose && !$self.args.quiet {
+            println!($($arg)*);
+        }
+    }};
+}
+
+macro_rules! log_info {
+    ($self:ident, $($arg:tt)*) => {{
+        if !$self.args.quiet {
+            println!($($arg)*);
+        }
+    }};
+}
+
+macro_rules! log_loud {
+    ($self:ident, $($arg:tt)*) => {{
+        println!($($arg)*);
+    }};
+}
+
 /// Recursively searches a given directory and its subdirectories for files with a given extension,
 /// and uses ffmpeg to convert those files to a different extension.
 ///
@@ -22,6 +44,12 @@ struct Args {
     /// If set, prints information about actions that would be taken, instead of actually doing anything.
     #[arg(short, long)]
     dry_run: bool,
+    /// If set, prints more messages about what is being done.
+    #[arg(short, long)]
+    verbose: bool,
+    /// If set, prints less messages about what is being done. Overrides the `--verbose` option.
+    #[arg(short, long)]
+    quiet: bool,
     /// The output file extension to which files will be converted.
     #[arg(short, long, default_value = "opus")]
     output: String,
@@ -69,17 +97,28 @@ impl Converter {
     }
 
     fn run(&mut self) -> anyhow::Result<()> {
+        log_info!(
+            self,
+            "{} version {}",
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION")
+        );
+
+        log_verbose!(self, "Args: {:?}", self.args);
+
         if self.args.dry_run {
-            println!("Dry-run enabled");
+            log_loud!(self, "Dry-run enabled");
         }
 
-        println!(
+        log_loud!(
+            self,
             "Converting files from {} to '{}'",
             self.format_input_args(),
             self.args.output
         );
 
         let walker = self.build_walker()?;
+
         walker.run(|| {
             Box::new(|entry| match entry {
                 Ok(e) => self.try_convert_entry(&e),
@@ -87,8 +126,8 @@ impl Converter {
             })
         });
 
-        println!("Converted {} files.", self.ok_count.get_mut());
-        println!("Finished with {} errors.", self.err_count.get_mut());
+        log_loud!(self, "Converted {} files.", self.ok_count.get_mut());
+        log_loud!(self, "Finished with {} errors.", self.err_count.get_mut());
 
         Ok(())
     }
@@ -128,7 +167,7 @@ impl Converter {
     }
 
     /// Transforms the input path into a form suitable for displaying
-    fn get_display_path<'a>(&'a self, path: &'a Path) -> impl Deref<Target = Path> + '_ {
+    fn format_path<'a>(&'a self, path: &'a Path) -> impl Deref<Target = Path> + '_ {
         self.current_dir
             .as_deref()
             .and_then(|base| pathdiff::diff_paths(path, base))
@@ -141,28 +180,34 @@ impl Converter {
             return self.handle_error(err);
         }
 
+        let path = entry.path();
+
         let Some(file_type) = entry.file_type() else {
             return self.handle_error(anyhow!(
                 "Directory entry '{}' does not have a file type",
-                entry.path().display()
+                self.format_path(path).display()
             ));
         };
 
         if !file_type.is_file() {
-            // Skip, but don't terminate, on entries that are not paths,
+            // Skip, but don't terminate, on entries that are not files,
             // as these include the directories being searched
+            log_verbose!(
+                self,
+                "Ignoring '{}': Not a file",
+                self.format_path(path).display()
+            );
             return WalkState::Continue;
         }
 
-        let path = entry.path();
-
-        println!("Converting '{}'", self.get_display_path(path).display());
+        log_verbose!(self, "Converting '{}'", self.format_path(path).display());
 
         match self.try_convert_path(path) {
             Ok(path) => {
-                println!(
-                    "Finished converting '{}'",
-                    self.get_display_path(&path).display()
+                log_info!(
+                    self,
+                    "Successfully converted '{}'",
+                    self.format_path(&path).display()
                 );
 
                 self.ok_count.fetch_add(1, Ordering::Relaxed);
@@ -184,20 +229,23 @@ impl Converter {
 
         if self.args.dry_run {
             // On a dry-run, just print what we would do instead of actually doing it
-            println!("Dry_run: Running '{:?}'", command);
+            log_info!(self, "Dry_run: Running command: '{:?}'", command);
             if !self.args.preserve_files {
-                println!(
+                log_info!(
+                    self,
                     "Dry_run: Removing file '{}'",
-                    self.get_display_path(path).display()
+                    self.format_path(path).display()
                 );
             }
             Ok(output_path)
         } else {
             // On a non-dry-run, actually run the command
+            log_verbose!(self, "Running command: '{:?}'", command);
             let output = command.output()?;
             if output.status.success() {
                 if !self.args.preserve_files {
                     // Attempt to remove the input file if the command succeeded
+                    log_verbose!(self, "Removing file '{}'", self.format_path(path).display());
                     std::fs::remove_file(path)?;
                 }
                 Ok(output_path)
@@ -211,7 +259,7 @@ impl Converter {
 
     fn handle_error(&self, err: impl Display) -> WalkState {
         self.err_count.fetch_add(1, Ordering::Relaxed);
-        println!("{:#}", err);
+        log_loud!(self, "{:#}", err);
         WalkState::Quit
     }
 }
