@@ -6,52 +6,64 @@ You must have the [`ffmpeg`](https://ffmpeg.org/) binary in your PATH for this a
 
 ## Usage
 ```
-ffmpeg_converter 1.1.0
-Recursively searches a given directory and its subdirectories for files with a given extension, and
-uses ffmpeg to convert those files to a different extension.
+ffmpeg_converter 2.0.0
+Recursively searches a given directory and its subdirectories for files with a given extension, and uses ffmpeg to convert those files to a different extension.
 
 Effectively functions as a shorthand for the following shell commands:
 
 `fd -e mp3 -x ffmpeg -i {} {.}.opus && fd -e mp3 -x rm`.
 
-USAGE:
-    cv [OPTIONS] [FROM] [TO] [-- <TARGET_DIR>]
+Usage: cv [OPTIONS] [INPUTS]... [-- <FFMPEG_ARGS>...]
 
-ARGS:
-    <FROM>
-            The file extension to convert from
+Arguments:
+  [INPUTS]...
+          The file extensions to convert from
 
-            [default: mp3]
+          [default: mp3]
 
-    <TO>
-            The file extension to convert to
+  [FFMPEG_ARGS]...
+          Extra arguments to be passed to ffmpeg during execution
 
-            [default: opus]
+Options:
+  -d, --dry-run
+          If set, prints information about actions that would be taken, instead of actually doing anything
 
-    <TARGET_DIR>
-            The directory to search in
+  -v, --verbose
+          If set, prints more messages about what is being done
 
-            [default: ./]
+  -q, --quiet
+          If set, prints less messages about what is being done. Overrides the `--verbose` option
 
-OPTIONS:
-    -d, --dry-run
-            If set, prints information about actions that would be taken, instead of actually doing
-            anything
+  -o, --output <OUTPUT>
+          The output file extension to which files will be converted
 
-    -f, --follow-links
-            If set, follows symbolic links
+          [default: opus]
 
-    -h, --help
-            Print help information
+  -t, --target-dir <TARGET_DIR>
+          The directory to search in
 
-    -m, --max-depth <MAX_DEPTH>
-            The maximum search depth. If unset, is infinite
+          [default: ./]
 
-    -s, --same-fs
-            If set, avoids crossing file system boundries when searching
+  -m, --max-depth <MAX_DEPTH>
+          The maximum search depth. If unset, is infinite
 
-    -V, --version
-            Print version information
+  -f, --follow-links
+          If set, follows symbolic links
+
+  -s, --same-fs
+          If set, avoids crossing file system boundries when searching
+
+  -n, --num-threads <NUM_THREADS>
+          The number of threads to use for searching and processing files. If unset, defaults to the number of CPU cores
+
+  -p, --preserve-files
+          If set, does not delete files after successfully converting them
+
+  -h, --help
+          Print help information (use `-h` for a summary)
+
+  -V, --version
+          Print version information
 ```
 
 ## Examples
@@ -60,7 +72,12 @@ To recursively convert all `*.mp3` files in the current directory and any subdir
 cv
 ```
 
-To recursively convert all `*.wav` files in the `Music/` directory and any subdirectories to `*.flac` files:
+To recursively convert all `*.wav` and `*.aiff` files in the `Music/` directory and any subdirectories to `*.flac` files:
 ```
-cv wav flac -- Music/
+cv -o flac -t Music/ wav aiff
+```
+
+To convert all `*.mp4` files in the current directory only to HEVC-encoded `*.mkv` files:
+```
+cv -o mkv -m 1 mp4 -- -c:v libx265
 ```
