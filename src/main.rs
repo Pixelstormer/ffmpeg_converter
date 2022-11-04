@@ -31,6 +31,9 @@ struct Args {
     /// If set, avoids crossing file system boundries when searching.
     #[clap(short, long)]
     same_fs: bool,
+    /// The number of threads to use for searching and processing files. If unset, defaults to the number of CPU cores.
+    #[clap(short, long)]
+    num_threads: Option<usize>,
     /// The file extension to convert from.
     #[clap(default_value = "mp3")]
     from: String,
@@ -85,8 +88,8 @@ impl Converter {
 
     /// Configures and builds a directory iterator over the files to be converted
     fn build_walker(&self) -> anyhow::Result<WalkParallel> {
-        // Utilise all available CPU cores
-        let num_threads = num_cpus::get();
+        // Use the user-specified number of threads, or the number of available CPU cores if unspecified
+        let num_threads = self.args.num_threads.unwrap_or_else(num_cpus::get);
 
         // Only match the files we want to convert
         let mut file_types = TypesBuilder::new();
