@@ -1,6 +1,6 @@
 use anyhow::bail;
 use clap::Parser;
-use ignore::{types::TypesBuilder, WalkBuilder, WalkState};
+use ignore::{types::TypesBuilder, DirEntry, WalkBuilder, WalkParallel, WalkState};
 use std::{
     path::PathBuf,
     process::Command,
@@ -39,100 +39,126 @@ struct Args {
     target_dir: PathBuf,
 }
 
-fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
+struct Converter {
+    args: Args,
+    current_dir: Option<PathBuf>,
+    ok_count: AtomicU16,
+    err_count: AtomicU16,
+}
 
-    if args.dry_run {
-        println!("Dry-run enabled");
+impl Converter {
+    fn new(args: Args) -> Self {
+        Self {
+            args,
+            current_dir: std::env::current_dir().ok(),
+            ok_count: Default::default(),
+            err_count: Default::default(),
+        }
     }
 
-    println!("Converting files from '{}' to '{}'", args.from, args.to);
+    fn run(&mut self) -> anyhow::Result<()> {
+        if self.args.dry_run {
+            println!("Dry-run enabled");
+        }
 
-    let error_count = AtomicU16::new(0);
-    let converted_count = AtomicU16::new(0);
+        println!(
+            "Converting files from '{}' to '{}'",
+            self.args.from, self.args.to
+        );
 
-    let mut types = TypesBuilder::new();
-    types.add("from", &format!("*.{}", args.from))?;
-    types.select("from");
-
-    let current_dir = std::env::current_dir().ok();
-
-    WalkBuilder::new(args.target_dir)
-        .standard_filters(false)
-        .types(types.build()?)
-        .max_depth(args.max_depth)
-        .follow_links(args.follow_links)
-        .same_file_system(args.same_fs)
-        .threads(num_cpus::get())
-        .build_parallel()
-        .run(|| {
-            Box::new(|path| match path {
-                Ok(dir) if dir.file_type().map(|f| f.is_file()).unwrap_or_default() => {
-                    let input_path = dir.into_path();
-                    let output_path = input_path.with_extension(&args.to);
-
-                    println!(
-                        "Converting '{}'",
-                        current_dir
-                            .as_ref()
-                            .and_then(|p| pathdiff::diff_paths(&input_path, p))
-                            .as_ref()
-                            .unwrap_or(&input_path)
-                            .display()
-                    );
-
-                    let mut command = Command::new("ffmpeg");
-                    command.arg("-i").arg(&input_path).arg(&output_path);
-
-                    if args.dry_run {
-                        println!("Dry_run: Running '{:?}'", command);
-                        println!("Dry_run: Removing file '{}'", input_path.display());
-                    } else if let Err(e) =
-                        command.output().map_err(anyhow::Error::new).and_then(|o| {
-                            o.status
-                                .success()
-                                .then(|| std::fs::remove_file(input_path))
-                                .map_or_else(
-                                    || bail!(String::from_utf8_lossy(&o.stderr).into_owned()),
-                                    |e| e.map_err(anyhow::Error::new),
-                                )
-                        })
-                    {
-                        error_count.fetch_add(1, Ordering::Relaxed);
-                        println!("{}", e);
-                    } else {
-                        converted_count.fetch_add(1, Ordering::Relaxed);
-
-                        println!(
-                            "Finished converting '{}'",
-                            current_dir
-                                .as_ref()
-                                .and_then(|p| pathdiff::diff_paths(&output_path, p))
-                                .as_ref()
-                                .unwrap_or(&output_path)
-                                .display()
-                        );
-                    }
-
-                    WalkState::Continue
-                }
-                Ok(_) => WalkState::Continue,
-                Err(e) => {
-                    error_count.fetch_add(1, Ordering::Relaxed);
-                    println!("{}", e);
-                    WalkState::Quit
-                }
+        let walker = self.build_walker()?;
+        walker.run(|| {
+            Box::new(|entry| match entry {
+                Ok(e) => self.try_convert_entry(e),
+                Err(e) => self.handle_error(e.into()),
             })
         });
 
-    println!(
-        "Converted {} files.",
-        converted_count.load(Ordering::Relaxed)
-    );
-    println!(
-        "Finished with {} errors.",
-        error_count.load(Ordering::Relaxed)
-    );
+        println!("Converted {} files.", self.ok_count.get_mut());
+        println!("Finished with {} errors.", self.err_count.get_mut());
 
-    Ok(())
+        Ok(())
+    }
+
+    /// Configures and builds a directory iterator over the files to be converted
+    fn build_walker(&self) -> anyhow::Result<WalkParallel> {
+        // Utilise all available CPU cores
+        let num_threads = num_cpus::get();
+
+        // Only match the files we want to convert
+        let mut file_types = TypesBuilder::new();
+        file_types.add("from", &format!("*.{}", self.args.from))?;
+        file_types.select("from");
+        let file_types = file_types.build()?;
+
+        // Configure the directory iterator according to the user-specified args
+        Ok(WalkBuilder::new(&self.args.target_dir)
+            .standard_filters(false)
+            .max_depth(self.args.max_depth)
+            .follow_links(self.args.follow_links)
+            .same_file_system(self.args.same_fs)
+            .threads(num_threads)
+            .types(file_types)
+            .build_parallel())
+    }
+
+    fn try_convert_entry(&self, entry: DirEntry) -> WalkState {
+        if entry.file_type().map(|f| f.is_file()).unwrap_or_default() {
+            let input_path = entry.into_path();
+            let output_path = input_path.with_extension(&self.args.to);
+
+            println!(
+                "Converting '{}'",
+                self.current_dir
+                    .as_ref()
+                    .and_then(|p| pathdiff::diff_paths(&input_path, p))
+                    .as_ref()
+                    .unwrap_or(&input_path)
+                    .display()
+            );
+
+            let mut command = Command::new("ffmpeg");
+            command.arg("-i").arg(&input_path).arg(&output_path);
+
+            if self.args.dry_run {
+                println!("Dry_run: Running '{:?}'", command);
+                println!("Dry_run: Removing file '{}'", input_path.display());
+            } else if let Err(e) = command.output().map_err(anyhow::Error::new).and_then(|o| {
+                o.status
+                    .success()
+                    .then(|| std::fs::remove_file(input_path))
+                    .map_or_else(
+                        || bail!(String::from_utf8_lossy(&o.stderr).into_owned()),
+                        |e| e.map_err(anyhow::Error::new),
+                    )
+            }) {
+                self.err_count.fetch_add(1, Ordering::Relaxed);
+                println!("{}", e);
+            } else {
+                self.ok_count.fetch_add(1, Ordering::Relaxed);
+
+                println!(
+                    "Finished converting '{}'",
+                    self.current_dir
+                        .as_ref()
+                        .and_then(|p| pathdiff::diff_paths(&output_path, p))
+                        .as_ref()
+                        .unwrap_or(&output_path)
+                        .display()
+                );
+            }
+        }
+
+        WalkState::Continue
+    }
+
+    fn handle_error(&self, err: anyhow::Error) -> WalkState {
+        self.err_count.fetch_add(1, Ordering::Relaxed);
+        println!("{}", err);
+        WalkState::Quit
+    }
+}
+
+fn main() -> anyhow::Result<()> {
+    Converter::new(Args::parse()).run()
 }
