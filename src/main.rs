@@ -229,11 +229,11 @@ impl Converter {
 
         if self.args.dry_run {
             // On a dry-run, just print what we would do instead of actually doing it
-            log_info!(self, "Dry_run: Running command: '{:?}'", command);
+            log_info!(self, "Dry-run: Running command: '{:?}'", command);
             if !self.args.preserve_files {
                 log_info!(
                     self,
-                    "Dry_run: Removing file '{}'",
+                    "Dry-run: Removing file '{}'",
                     self.format_path(path).display()
                 );
             }
