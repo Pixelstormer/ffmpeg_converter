@@ -1,8 +1,11 @@
-use anyhow::bail;
+use anyhow::anyhow;
 use clap::Parser;
 use ignore::{types::TypesBuilder, DirEntry, WalkBuilder, WalkParallel, WalkState};
 use std::{
-    path::PathBuf,
+    borrow::Cow,
+    fmt::Display,
+    ops::Deref,
+    path::{Path, PathBuf},
     process::Command,
     sync::atomic::{AtomicU16, Ordering},
 };
@@ -69,8 +72,8 @@ impl Converter {
         let walker = self.build_walker()?;
         walker.run(|| {
             Box::new(|entry| match entry {
-                Ok(e) => self.try_convert_entry(e),
-                Err(e) => self.handle_error(e.into()),
+                Ok(e) => self.try_convert_entry(&e),
+                Err(e) => self.handle_error(e),
             })
         });
 
@@ -102,59 +105,84 @@ impl Converter {
             .build_parallel())
     }
 
-    fn try_convert_entry(&self, entry: DirEntry) -> WalkState {
-        if entry.file_type().map(|f| f.is_file()).unwrap_or_default() {
-            let input_path = entry.into_path();
-            let output_path = input_path.with_extension(&self.args.to);
-
-            println!(
-                "Converting '{}'",
-                self.current_dir
-                    .as_ref()
-                    .and_then(|p| pathdiff::diff_paths(&input_path, p))
-                    .as_ref()
-                    .unwrap_or(&input_path)
-                    .display()
-            );
-
-            let mut command = Command::new("ffmpeg");
-            command.arg("-i").arg(&input_path).arg(&output_path);
-
-            if self.args.dry_run {
-                println!("Dry_run: Running '{:?}'", command);
-                println!("Dry_run: Removing file '{}'", input_path.display());
-            } else if let Err(e) = command.output().map_err(anyhow::Error::new).and_then(|o| {
-                o.status
-                    .success()
-                    .then(|| std::fs::remove_file(input_path))
-                    .map_or_else(
-                        || bail!(String::from_utf8_lossy(&o.stderr).into_owned()),
-                        |e| e.map_err(anyhow::Error::new),
-                    )
-            }) {
-                self.err_count.fetch_add(1, Ordering::Relaxed);
-                println!("{}", e);
-            } else {
-                self.ok_count.fetch_add(1, Ordering::Relaxed);
-
-                println!(
-                    "Finished converting '{}'",
-                    self.current_dir
-                        .as_ref()
-                        .and_then(|p| pathdiff::diff_paths(&output_path, p))
-                        .as_ref()
-                        .unwrap_or(&output_path)
-                        .display()
-                );
-            }
-        }
-
-        WalkState::Continue
+    /// Transforms the input path into a form suitable for displaying
+    fn get_display_path<'a>(&'a self, path: &'a Path) -> impl Deref<Target = Path> + '_ {
+        self.current_dir
+            .as_deref()
+            .and_then(|base| pathdiff::diff_paths(path, base))
+            .or_else(|| path.canonicalize().ok())
+            .map_or_else(|| Cow::Borrowed(path), Cow::Owned)
     }
 
-    fn handle_error(&self, err: anyhow::Error) -> WalkState {
+    fn try_convert_entry(&self, entry: &DirEntry) -> WalkState {
+        if let Some(err) = entry.error() {
+            return self.handle_error(err);
+        }
+
+        let Some(file_type) = entry.file_type() else {
+            return self.handle_error(anyhow!(
+                "Directory entry '{}' does not have a file type",
+                entry.path().display()
+            ));
+        };
+
+        if !file_type.is_file() {
+            return self.handle_error(anyhow!(
+                "Directory entry '{}' is not a file",
+                entry.path().display()
+            ));
+        }
+
+        let path = entry.path();
+
+        println!("Converting '{}'", self.get_display_path(path).display());
+
+        match self.try_convert_path(path) {
+            Ok(path) => {
+                println!(
+                    "Finished converting '{}'",
+                    self.get_display_path(&path).display()
+                );
+
+                self.ok_count.fetch_add(1, Ordering::Relaxed);
+                WalkState::Continue
+            }
+            Err(err) => self.handle_error(err),
+        }
+    }
+
+    fn try_convert_path(&self, path: &Path) -> anyhow::Result<PathBuf> {
+        let output_path = path.with_extension(&self.args.to);
+
+        let mut command = Command::new("ffmpeg");
+        command.arg("-i").arg(path).arg(&output_path);
+
+        if self.args.dry_run {
+            // On a dry-run, just print what we would do instead of actually doing it
+            println!("Dry_run: Running '{:?}'", command);
+            println!(
+                "Dry_run: Removing file '{}'",
+                self.get_display_path(path).display()
+            );
+            Ok(output_path)
+        } else {
+            // On a non-dry-run, actually run the command
+            let output = command.output()?;
+            if output.status.success() {
+                // Attempt to remove the input file if the command succeeded
+                std::fs::remove_file(path)?;
+                Ok(output_path)
+            } else {
+                // If the command didn't succeed, don't remove the input file to avoid potential data loss,
+                // and return the command's error log
+                Err(anyhow!(String::from_utf8_lossy(&output.stderr).to_string()))
+            }
+        }
+    }
+
+    fn handle_error(&self, err: impl Display) -> WalkState {
         self.err_count.fetch_add(1, Ordering::Relaxed);
-        println!("{}", err);
+        println!("{:#}", err);
         WalkState::Quit
     }
 }
