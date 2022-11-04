@@ -20,32 +20,35 @@ use std::{
 #[command(version)]
 struct Args {
     /// If set, prints information about actions that would be taken, instead of actually doing anything.
-    #[clap(short, long)]
+    #[arg(short, long)]
     dry_run: bool,
+    /// The output file extension to which files will be converted.
+    #[arg(short, long, default_value = "opus")]
+    output: String,
+    /// The directory to search in.
+    #[arg(short, long, default_value = "./")]
+    target_dir: PathBuf,
     /// The maximum search depth. If unset, is infinite.
-    #[clap(short, long)]
+    #[arg(short, long)]
     max_depth: Option<usize>,
     /// If set, follows symbolic links.
-    #[clap(short, long)]
+    #[arg(short, long)]
     follow_links: bool,
     /// If set, avoids crossing file system boundries when searching.
-    #[clap(short, long)]
+    #[arg(short, long)]
     same_fs: bool,
     /// The number of threads to use for searching and processing files. If unset, defaults to the number of CPU cores.
-    #[clap(short, long)]
+    #[arg(short, long)]
     num_threads: Option<usize>,
     /// If set, does not delete files after successfully converting them.
-    #[clap(short, long)]
+    #[arg(short, long)]
     preserve_files: bool,
-    /// The file extension to convert from.
-    #[clap(default_value = "mp3")]
-    from: String,
-    /// The file extension to convert to.
-    #[clap(default_value = "opus")]
-    to: String,
-    /// The directory to search in.
-    #[clap(last = true, default_value = "./")]
-    target_dir: PathBuf,
+    /// The file extensions to convert from.
+    #[arg(default_value = "mp3")]
+    inputs: Vec<String>,
+    /// Extra arguments to be passed to ffmpeg during execution.
+    #[arg(raw = true)]
+    ffmpeg_args: Vec<String>,
 }
 
 struct Converter {
@@ -71,8 +74,9 @@ impl Converter {
         }
 
         println!(
-            "Converting files from '{}' to '{}'",
-            self.args.from, self.args.to
+            "Converting files from {} to '{}'",
+            self.format_input_args(),
+            self.args.output
         );
 
         let walker = self.build_walker()?;
@@ -89,6 +93,16 @@ impl Converter {
         Ok(())
     }
 
+    fn format_input_args(&self) -> String {
+        let mut result = String::new();
+        if let Some((tail, head)) = self.args.inputs.split_last() {
+            result.reserve_exact(head.iter().map(|s| s.len() + 4).sum::<usize>() + tail.len() + 2);
+            result.extend(head.iter().map(|s| format!("'{}', ", s)));
+            result.push_str(&format!("'{}'", tail));
+        }
+        result
+    }
+
     /// Configures and builds a directory iterator over the files to be converted
     fn build_walker(&self) -> anyhow::Result<WalkParallel> {
         // Use the user-specified number of threads, or the number of available CPU cores if unspecified
@@ -96,8 +110,10 @@ impl Converter {
 
         // Only match the files we want to convert
         let mut file_types = TypesBuilder::new();
-        file_types.add("from", &format!("*.{}", self.args.from))?;
-        file_types.select("from");
+        for input in &self.args.inputs {
+            file_types.add(input, &format!("*.{}", input))?;
+        }
+        file_types.select("all");
         let file_types = file_types.build()?;
 
         // Configure the directory iterator according to the user-specified args
@@ -158,10 +174,14 @@ impl Converter {
     }
 
     fn try_convert_path(&self, path: &Path) -> anyhow::Result<PathBuf> {
-        let output_path = path.with_extension(&self.args.to);
+        let output_path = path.with_extension(&self.args.output);
 
         let mut command = Command::new("ffmpeg");
-        command.arg("-i").arg(path).arg(&output_path);
+        command
+            .arg("-i")
+            .arg(path)
+            .args(&self.args.ffmpeg_args)
+            .arg(&output_path);
 
         if self.args.dry_run {
             // On a dry-run, just print what we would do instead of actually doing it
