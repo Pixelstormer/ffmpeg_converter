@@ -17,7 +17,7 @@ use std::{
 ///
 /// `fd -e mp3 -x ffmpeg -i {} {.}.opus && fd -e mp3 -x rm`.
 #[derive(Parser, Debug)]
-#[clap(version = clap::crate_version!())]
+#[command(version)]
 struct Args {
     /// If set, prints information about actions that would be taken, instead of actually doing anything.
     #[clap(short, long)]
