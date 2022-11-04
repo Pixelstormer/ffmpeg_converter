@@ -166,10 +166,12 @@ impl Converter {
         if self.args.dry_run {
             // On a dry-run, just print what we would do instead of actually doing it
             println!("Dry_run: Running '{:?}'", command);
-            println!(
-                "Dry_run: Removing file '{}'",
-                self.get_display_path(path).display()
-            );
+            if !self.args.preserve_files {
+                println!(
+                    "Dry_run: Removing file '{}'",
+                    self.get_display_path(path).display()
+                );
+            }
             Ok(output_path)
         } else {
             // On a non-dry-run, actually run the command
