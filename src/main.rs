@@ -149,10 +149,9 @@ impl Converter {
         };
 
         if !file_type.is_file() {
-            return self.handle_error(anyhow!(
-                "Directory entry '{}' is not a file",
-                entry.path().display()
-            ));
+            // Skip, but don't terminate, on entries that are not paths,
+            // as these include the directories being searched
+            return WalkState::Continue;
         }
 
         let path = entry.path();
