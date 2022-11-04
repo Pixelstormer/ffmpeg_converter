@@ -34,6 +34,9 @@ struct Args {
     /// The number of threads to use for searching and processing files. If unset, defaults to the number of CPU cores.
     #[clap(short, long)]
     num_threads: Option<usize>,
+    /// If set, does not delete files after successfully converting them.
+    #[clap(short, long)]
+    preserve_files: bool,
     /// The file extension to convert from.
     #[clap(default_value = "mp3")]
     from: String,
@@ -172,8 +175,10 @@ impl Converter {
             // On a non-dry-run, actually run the command
             let output = command.output()?;
             if output.status.success() {
-                // Attempt to remove the input file if the command succeeded
-                std::fs::remove_file(path)?;
+                if !self.args.preserve_files {
+                    // Attempt to remove the input file if the command succeeded
+                    std::fs::remove_file(path)?;
+                }
                 Ok(output_path)
             } else {
                 // If the command didn't succeed, don't remove the input file to avoid potential data loss,
