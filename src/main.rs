@@ -171,7 +171,6 @@ impl Converter {
         self.current_dir
             .as_deref()
             .and_then(|base| pathdiff::diff_paths(path, base))
-            .or_else(|| path.canonicalize().ok())
             .map_or_else(|| Cow::Borrowed(path), Cow::Owned)
     }
 
